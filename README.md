@@ -6,6 +6,7 @@
 ### 逻辑漏洞
 
 [Platypusdefi](Platypusdefi.md)
+
 [KashiPairMediumRiskV1](KashiPairMediumRiskV1.md)
 
 ### 任意地址调用
@@ -13,6 +14,9 @@
 
 ### 治理攻击
 [Benstalk](Benstalk.md)
+
+### 可升级合约
+[EFVault](EFVault.md)
 ## 2、运行
 
 直接把poc copy到forge的test文件夹中
